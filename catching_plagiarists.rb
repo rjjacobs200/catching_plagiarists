@@ -13,6 +13,9 @@ N_VALUE   = 4
 DIRECTORY = Dir.pwd
 THRESHOLD = 10
 
+FILENAME_JUSTIFY = 50
+NUM_SAME_JUSTIFY = 7
+
 require 'set'
 require 'optparse'
 
@@ -25,8 +28,7 @@ class WordList
         raise ArgumentError, 'not a file'   unless File.exist?    filename
         raise ArgumentError, 'not readable' unless File.readable? filename
         raise ArgumentError, 'is directory' if     Dir.exist?     filename
-        verbose "Beginning to list words"
-        words = Array.new
+        words = []
         File.open filename do |file|
             verbose "Listing words for: #{filename}"
             file.each_line do |line|
@@ -47,7 +49,7 @@ class ChunkSet
         raise ArgumentError, 'not a file'   unless File.exist?    filename
         raise ArgumentError, 'not readable' unless File.readable? filename
         raise ArgumentError, 'is directory' if     Dir.exist?     filename
-        verbose "Creating chunks for #{filename}"
+        verbose "Creating chunks for #{filename}" 
         word_list = WordList.list_words filename
         chunk_set = Set.new
         for i in (0..word_list.length - n)
@@ -68,7 +70,6 @@ class Document
     # # filename: The file of which to make a word list. Must be a file object,
     #   or a path to a valid file as a String
     def initialize filename, n
-    	verbose "Sanitizing Doc: #{@filename}" 
         @chunks   = ChunkSet.create_chunks filename, n
         @filename = filename
     end
@@ -93,7 +94,6 @@ class DocumentFetcher
             if Dir.exist? filename
                 fetch filename, recursive, n, document_collection if recursive
             elsif File.exist? filename
-            	verbose "Adding #{filename} to document list"
                 document_collection.push Document.new filename, n
             else
                 raise StandardError, "neither file nor directory: #{filename}"
@@ -113,8 +113,8 @@ class DocumentPair
     # first, second: The two documents to be contained and compared
     # TODO: Perhaps make this class / function variadic?
     def initialize a, b
-    	verbose "Creating DocPair: #{@filenames}"
         @filenames  = [a.filename, b.filename]
+        verbose "Creating DocPair: #{@filenames}"
         @num_same   = (a.chunks  & b.chunks).size
         @similarity = @num_same.to_f / [a.chunks.size, b.chunks.size].min
     end
@@ -122,11 +122,14 @@ class DocumentPair
     # Ruby's "spaceship operator". Facilitates comparison between two objects,
     #   such as for array sorting.
     def <=> other
-        @similarity <=> other.similarity
+        @num_same <=> other.num_same
     end
 
+	# TODO: Make this more flexable instead of just using magic numbers
     def to_s
-        ((@filenames.to_s.ljust 50) + (@num_same.ljust 6) + @similarity.to_s)
+        ((@filenames.to_s.ljust FILENAME_JUSTIFY) +
+          (@num_same.to_s.ljust NUM_SAME_JUSTIFY) + 
+         @similarity.to_s)
     end
 
 end
@@ -146,9 +149,9 @@ class DocumentSet
         pairs = Array.new
         (DocumentFetcher.fetch directory, recursive, n).combination 2 do |a, b|
             pair = DocumentPair.new a, b
-            pairs.push pair if pair.similarity > threshold
+            pairs.push pair if pair.num_same >= threshold
         end
-        puts pairs.sort
+        pairs
     end
     
 end
@@ -189,4 +192,5 @@ unless Dir.exist? directory then
 end
 
 # Now run it!
-DocumentSet.compare directory, recursive, n_value, threshold
+verbose "Threshold value of #{threshold}"
+puts (DocumentSet.compare directory, recursive, n_value, threshold).sort
