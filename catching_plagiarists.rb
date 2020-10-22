@@ -9,15 +9,17 @@
 # fifteen may only consider two documents simalar if entire verbaitem sentences
 # are shared.
 
-N_VALUE   = 4
-DIRECTORY = Dir.pwd
-THRESHOLD = 10
+N_VALUE         = 4
+DIRECTORY       = Dir.pwd
+THRESHOLD       = 10
+MAX_NUM_RESULTS = 50
 
 FILENAME_JUSTIFY = 50
 NUM_SAME_JUSTIFY = 7
 
 require 'set'
 require 'optparse'
+require 'matrix'
 
 class WordList
     # Creates a list of words in a file to allow quick chunk generation.
@@ -62,7 +64,6 @@ end
 
 class Document
     # Contains basic metadata about a document, and its chunk set.
-    # TODO: Make a <=> function to increase comparison refactorability?
 
     # Generates reader functions for the listed variables
     attr_reader :filename, :chunks
@@ -113,8 +114,7 @@ class DocumentPair
     # first, second: The two documents to be contained and compared
     # TODO: Perhaps make this class / function variadic?
     def initialize a, b
-        @filenames  = [a.filename, b.filename]
-        verbose "Creating DocPair: #{@filenames}"
+        @filenames  = [a.filename, b.filename].sort
         @num_same   = (a.chunks  & b.chunks).size
         @similarity = @num_same.to_f / [a.chunks.size, b.chunks.size].min
     end
@@ -128,7 +128,7 @@ class DocumentPair
 	# TODO: Make this more flexable instead of just using magic numbers
     def to_s
         ((@filenames.to_s.ljust FILENAME_JUSTIFY) +
-          (@num_same.to_s.ljust NUM_SAME_JUSTIFY) + 
+         ( @num_same.to_s.ljust NUM_SAME_JUSTIFY) + 
          @similarity.to_s)
     end
 
@@ -151,7 +151,7 @@ class DocumentSet
             pair = DocumentPair.new a, b
             pairs.push pair if pair.num_same >= threshold
         end
-        pairs
+        pairs.sort!
     end
     
 end
@@ -160,25 +160,76 @@ end
 # theory, it's more about making the user input computer readable, and
 # putting the theory stuff above into motion
 
+class DocMatrix
+
+	def initialize directory, recursive, n, threshold, max_num_results
+		@pairs = (DocumentSet.compare directory, recursive, n, threshold)
+ 			 .last max_num_results
+		max_num_results = [max_num_results, @pairs.length].min
+		return nil if max_num_results == 0
+		@matrix = Matrix.empty 0, 4
+		@pairs.each do |pair|
+			a, b = pair.filenames
+			@matrix = Matrix.vstack @matrix,
+				(Matrix.row_vector [a, b, pair.num_same, pair.similarity])
+		end
+		@matrix
+	end
+
+	def justified_rows
+		justs = find_justifications
+		rows = []
+		(0...@matrix.row_count).each do |row|
+			rows.push ("#{@matrix[row, 0].to_s.ljust justs[0]}   " + 
+					   "#{@matrix[row, 1].to_s.ljust justs[1]}   " +
+					   "#{@matrix[row, 2].to_s.rjust justs[2]}   " +
+					   "#{@matrix[row, 3]} "                        )
+		end
+		rows
+	end
+
+	private
+	
+	def find_justifications
+		justifications = Array.new 2 do |col|
+			longest = 0   # Length of longest filename
+			(0..@matrix.row_count).each do |row|
+				longest = [longest, @matrix[row, col].to_s.length].max
+			end
+			longest
+		end
+		
+		longest = 0   # Length of largest number
+		(0..@matrix.row_count).each do |row|
+			longest = [longest, @matrix[row, 2].to_s.length].max
+		end
+		justifications[2] = longest
+		justifications
+	end
+
+end
+
 # Prints the provided message to the terminal if VERBOSE_MODE is on
 def verbose message
     puts message if VERBOSE
 end
 
 # Sets the default values of some command line options
-n_value   = N_VALUE
-directory = DIRECTORY
-threshold = THRESHOLD
+n_value         = N_VALUE
+directory       = DIRECTORY
+threshold       = THRESHOLD
+max_num_results = MAX_NUM_RESULTS
 
 # Read command line optins into variables. Uses the Ruby optparse library
 OptionParser.new do |opti|
     opti.banner = 'Usage: catching_plagiarists.rb [options] directory_name'
-    opti.on '-v',        'Run in verbose mode'          do VERBOSE    = true end
-    opti.on '-r',        'Search directory recursively' do recursive  = true end
-    opti.on '-dSTRING',  'Directiry to search through'  do |d| directory = d end
-    opti.on '-nINTEGER', 'Value of n, chunk length'     do |n| n_value   = n end
-    opti.on '-tINTEGER', 'Threshold value'              do |t| threshold = t end
-    opti.on '-h',        'Display this help message'    do puts opti         end
+    opti.on('-v',        'Run in verbose mode'        ){VERBOSE   = true}
+    opti.on('-r',        'Crawl directory recursively'){recursive = true}
+    opti.on('-dSTRING',  'Directiry to search through'){|d| directory       = d}
+    opti.on('-nINTEGER', 'Value of n, chunk length'   ){|n| n_value         = n}
+    opti.on('-tINTEGER', 'Threshold value'            ){|t| threshold       = t}
+    opti.on('-mINTEGER', 'Max number of results shown'){|m| max_num_results = m}
+    opti.on('-h',        'Display this help message'  ){puts opti}
 end.parse!
 
 # Unless the user requests these to be true, they become false
@@ -192,5 +243,6 @@ unless Dir.exist? directory then
 end
 
 # Now run it!
-verbose "Threshold value of #{threshold}"
-puts (DocumentSet.compare directory, recursive, n_value, threshold).sort
+matrix = DocMatrix.new directory, recursive, n_value, threshold, max_num_results
+
+puts matrix.justified_rows
